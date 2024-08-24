@@ -1,0 +1,22 @@
+{
+    "influxdb": {
+        "url": "http://localhost:8086",
+        "token": "v0tlAKYgeeLW3cUCfHOdmxLKe78KSFreKhSYLT5LVxpe679Tz19eHEkgHnLAYeg-wTx2kqlSACx-Ja-qx_KjgA==",
+        "org": "zdxr",
+        "bucket": "bench"
+    },
+    "measurement": {
+        "devices": 12,
+        "channels": 18,
+        "sample_rate": 1000,
+        "measurement_duration": 1.0,
+        "full_scale": 5.0,
+        "target_voltage": 4.0,
+        "voltage_fluctuation": 0.2,
+        "threshold": 3.5
+    },
+    "scpi_server": {
+        "host": "localhost",
+        "port": 5025
+    }
+}
