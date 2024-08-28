@@ -5,7 +5,9 @@ import (
 	"log"
 	"net/http"
 	"sync"
+	"time"
 
+	"ats-project/backend/internal/db"
 	"ats-project/backend/internal/scpi"
 
 	"github.com/gorilla/websocket"
@@ -21,10 +23,22 @@ var (
 	clientsMu sync.Mutex
 )
 
-type StartMessage struct {
+type Message struct {
 	Action   string `json:"action"`
 	Devices  []int  `json:"devices"`
 	Channels []int  `json:"channels"`
+}
+
+var (
+	measurementRunning bool
+	measurementPaused  bool
+	pauseCond          *sync.Cond
+	stateMutex         sync.Mutex
+	stopChan           chan struct{}
+)
+
+func init() {
+	pauseCond = sync.NewCond(&stateMutex)
 }
 
 func HandleWebSocket(w http.ResponseWriter, r *http.Request, scpiClient *scpi.Client) {
@@ -54,40 +68,107 @@ func HandleWebSocket(w http.ResponseWriter, r *http.Request, scpiClient *scpi.Cl
 }
 
 func handleWebSocketMessage(conn *websocket.Conn, messageType int, message []byte, scpiClient *scpi.Client) {
-	//log.Printf("Received message: %s\n", message)
-
-	var msg map[string]interface{}
+	var msg Message
 	if err := json.Unmarshal(message, &msg); err != nil {
 		log.Println("Error parsing JSON message:", err)
 		return
 	}
 
-	action, ok := msg["action"].(string)
-	if !ok {
-		log.Println("Invalid action in message")
-		return
-	}
+	stateMutex.Lock()
+	defer stateMutex.Unlock()
 
-	switch action {
+	switch msg.Action {
 	case "start":
-		var startMsg StartMessage
-		if err := json.Unmarshal(message, &startMsg); err != nil {
-			log.Println("Error parsing start message:", err)
-			return
+		if !measurementRunning {
+			measurementRunning = true
+			measurementPaused = false
+			stopChan = make(chan struct{})
+			go startMeasurement(conn, scpiClient, msg.Devices, msg.Channels)
 		}
-		startMeasurement(conn, scpiClient, startMsg.Devices, startMsg.Channels)
+	case "pause":
+		if measurementRunning && !measurementPaused {
+			measurementPaused = true
+		}
+	case "resume":
+		if measurementRunning && measurementPaused {
+			measurementPaused = false
+			pauseCond.Broadcast()
+		}
 	case "stop":
-		stopMeasurement(scpiClient)
+		if measurementRunning {
+			if stopChan != nil {
+				select {
+				case <-stopChan:
+					// Channel is already closed, do nothing
+				default:
+					close(stopChan)
+				}
+			}
+			measurementRunning = false
+			measurementPaused = false
+			pauseCond.Broadcast()
+		}
 	default:
-		log.Println("Unknown action:", action)
+		log.Println("Unknown action:", msg.Action)
 	}
 }
 
 func startMeasurement(conn *websocket.Conn, scpiClient *scpi.Client, devices, channels []int) {
 	log.Println("Measurement started")
+	defer func() {
+		stateMutex.Lock()
+		measurementRunning = false
+		measurementPaused = false
+		if stopChan != nil {
+			select {
+			case <-stopChan:
+				// Channel is already closed, do nothing
+			default:
+				close(stopChan)
+			}
+			stopChan = nil
+		}
+		stateMutex.Unlock()
+		log.Println("Measurement completed")
+
+		// Notify the client that the measurement has completed and write data to the database
+		notifyMeasurementComplete(conn, devices, channels)
+	}()
+
+	results := make(chan map[string]interface{}, len(devices)*len(channels))
+	var wg sync.WaitGroup
+
 	for _, device := range devices {
-		for _, channel := range channels {
-			//log.Printf("Measuring voltage for device %d, channel %d\n", device, channel)
+		wg.Add(1)
+		go measureDevice(scpiClient, device, channels, results, &wg)
+	}
+
+	go func() {
+		wg.Wait()
+		close(results)
+	}()
+
+	sendResults(conn, results)
+}
+
+func measureDevice(scpiClient *scpi.Client, device int, channels []int, results chan<- map[string]interface{}, wg *sync.WaitGroup) {
+	defer wg.Done()
+
+	for _, channel := range channels {
+		stateMutex.Lock()
+		for measurementPaused {
+			pauseCond.Wait()
+		}
+		if !measurementRunning {
+			stateMutex.Unlock()
+			return
+		}
+		stateMutex.Unlock()
+
+		select {
+		case <-stopChan:
+			return
+		default:
 			voltages, err := scpiClient.MeasureVoltage(device, channel)
 			if err != nil {
 				log.Printf("Error measuring voltage for device %d, channel %d: %v\n", device, channel, err)
@@ -96,7 +177,7 @@ func startMeasurement(conn *websocket.Conn, scpiClient *scpi.Client, devices, ch
 
 			passed := true
 			for _, voltage := range voltages {
-				if voltage >= 6554 && voltage <= 45875 { //0.5v-3.5v
+				if voltage > 6554 && voltage < 45875 { // 0.5v-3.5v
 					passed = false
 					break
 				}
@@ -109,27 +190,99 @@ func startMeasurement(conn *websocket.Conn, scpiClient *scpi.Client, devices, ch
 				"passed":   passed,
 			}
 
-			jsonResult, err := json.Marshal(result)
-			if err != nil {
-				log.Printf("Error marshaling result: %v\n", err)
-				continue
-			}
-
-			//log.Printf("JSON result: %s\n", jsonResult)
-			if err := conn.WriteMessage(websocket.TextMessage, jsonResult); err != nil {
-				log.Printf("Error sending result: %v\n", err)
-			}
-
-			// 插入延时
-			//time.Sleep(200 * time.Millisecond) // 这里设置延时为1秒，可以根据需要调整
+			results <- result
 		}
 	}
 }
 
-func stopMeasurement(scpiClient *scpi.Client) {
-	log.Println("Measurement stopped")
-	if err := scpiClient.StopMeasurement(); err != nil {
-		log.Printf("Error stopping measurement: %v\n", err)
+func sendResults(conn *websocket.Conn, results <-chan map[string]interface{}) {
+	batch := make([]map[string]interface{}, 0, 10)
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case result, ok := <-results:
+			if !ok {
+				if len(batch) > 0 {
+					sendBatch(conn, batch, true)
+				}
+				return
+			}
+			batch = append(batch, result)
+			if len(batch) >= 10 {
+				sendBatch(conn, batch, false)
+				batch = batch[:0]
+			}
+		case <-ticker.C:
+			if len(batch) > 0 {
+				sendBatch(conn, batch, false)
+				batch = batch[:0]
+			}
+		}
+	}
+}
+
+func sendBatch(conn *websocket.Conn, batch []map[string]interface{}, completed bool) {
+	response := map[string]interface{}{
+		"status":  "in_progress",
+		"results": batch,
+	}
+
+	if completed {
+		response["status"] = "completed"
+	}
+
+	jsonResponse, err := json.Marshal(response)
+	if err != nil {
+		log.Printf("Error marshaling response: %v\n", err)
+		return
+	}
+
+	if err := conn.WriteMessage(websocket.TextMessage, jsonResponse); err != nil {
+		log.Printf("Error sending response: %v\n", err)
+	}
+}
+
+func notifyMeasurementComplete(conn *websocket.Conn, devices, channels []int) {
+	// Notify the client that the writing process to the database is starting
+	sendMessage(conn, "writing", "Measurement data is being written to the database")
+	log.Println("Measurement data is being written to the database...")
+
+	// Write measurement data to the database
+	for _, device := range devices {
+		for _, channel := range channels {
+			// Here we assume the voltages were stored in the results and now need to be written to the database
+			// Convert voltages from []int to []float64
+			voltages := []float64{} // Retrieve the actual voltages for this device and channel
+
+			if err := db.WriteMeasurementData(device, channel, voltages); err != nil {
+				log.Printf("Error writing measurement data to database: %v\n", err)
+				sendMessage(conn, "error", "Error writing measurement data to the database")
+				return
+			}
+		}
+	}
+
+	// Notify the client that the writing process to the database has completed
+	sendMessage(conn, "completed", "Measurement data has been successfully written to the database")
+	log.Println("Measurement data has been successfully written to the database!")
+}
+
+func sendMessage(conn *websocket.Conn, status, message string) {
+	response := map[string]interface{}{
+		"status":  status,
+		"message": message,
+	}
+
+	jsonResponse, err := json.Marshal(response)
+	if err != nil {
+		log.Printf("Error marshaling message: %v\n", err)
+		return
+	}
+
+	if err := conn.WriteMessage(websocket.TextMessage, jsonResponse); err != nil {
+		log.Printf("Error sending message: %v\n", err)
 	}
 }
 

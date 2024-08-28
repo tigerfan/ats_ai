@@ -6,39 +6,63 @@ import (
 	"fmt"
 	"net"
 	"strconv"
+	"sync"
 )
 
 type Client struct {
-	conn net.Conn
+	connections map[int]net.Conn
+	mu          sync.Mutex
 }
 
 func NewClient() *Client {
-	return &Client{}
+	return &Client{
+		connections: make(map[int]net.Conn),
+	}
 }
 
-func (c *Client) Connect(address string) error {
-	conn, err := net.Dial("tcp", address)
-	if err != nil {
-		return err
+func (c *Client) Connect(baseAddress string, numDevices int) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	for i := 1; i <= numDevices; i++ {
+		address := fmt.Sprintf("%s:%d", baseAddress, 5025+i-1)
+		conn, err := net.Dial("tcp", address)
+		if err != nil {
+			return fmt.Errorf("failed to connect to device %d: %w", i, err)
+		}
+		c.connections[i] = conn
 	}
-	c.conn = conn
 	return nil
 }
 
 func (c *Client) Close() error {
-	if c.conn != nil {
-		return c.conn.Close()
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	var lastErr error
+	for _, conn := range c.connections {
+		if err := conn.Close(); err != nil {
+			lastErr = err
+		}
 	}
-	return nil
+	return lastErr
 }
 
-func (c *Client) SendCommand(command string) (string, error) {
-	_, err := fmt.Fprintf(c.conn, command+"\n")
+func (c *Client) SendCommand(device int, command string) (string, error) {
+	c.mu.Lock()
+	conn, ok := c.connections[device]
+	c.mu.Unlock()
+
+	if !ok {
+		return "", fmt.Errorf("device %d not connected", device)
+	}
+
+	_, err := fmt.Fprintf(conn, command+"\n")
 	if err != nil {
 		return "", err
 	}
 
-	response, err := bufio.NewReader(c.conn).ReadString('\n')
+	response, err := bufio.NewReader(conn).ReadString('\n')
 	if err != nil {
 		return "", err
 	}
@@ -47,8 +71,8 @@ func (c *Client) SendCommand(command string) (string, error) {
 }
 
 func (c *Client) MeasureVoltage(device, channel int) ([]int, error) {
-	command := fmt.Sprintf("%d:MEAS:%d", device, channel)
-	response, err := c.SendCommand(command)
+	command := fmt.Sprintf("MEAS:%d", channel)
+	response, err := c.SendCommand(device, command)
 	if err != nil {
 		return nil, err
 	}
@@ -66,26 +90,4 @@ func (c *Client) MeasureVoltage(device, channel int) ([]int, error) {
 	}
 
 	return voltages, nil
-}
-
-func (c *Client) StartMeasurement(devices, channels []int) error {
-	// In this implementation, we don't need a separate start command
-	// as the measurement starts immediately when we send the MEAS command
-	return nil
-}
-
-func (c *Client) StopMeasurement() error {
-	// The SCPI server doesn't have a stop command in this implementation
-	return nil
-}
-
-// SetSamplingRate and SetMeasurementDuration are not supported by the current SCPI server
-// You may want to remove these methods or keep them as no-op for future compatibility
-
-func (c *Client) SetSamplingRate(rate float64) error {
-	return nil
-}
-
-func (c *Client) SetMeasurementDuration(duration float64) error {
-	return nil
 }

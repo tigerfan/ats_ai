@@ -18,7 +18,7 @@
           trigger: 'axis'
         },
         legend: {
-          data: ['通道波形']
+          data: [`设备${$currentMeasurementData.device}通道${$currentMeasurementData.channel}`]
         },
         xAxis: {
           type: 'category',
@@ -72,12 +72,6 @@
     };
 
     updateChart();
-  }
-
-  $: if ($selectedHistoricalChannel !== null) {
-    console.log('Selected historical channel:', $selectedHistoricalChannel);
-    // 这里可以添加处理选中历史通道的逻辑
-    // 例如，从服务器获取该通道的历史数据并更新图表
   }
 
   //$: console.log('曲线组件中的数据:', $currentMeasurementData);

@@ -1,4 +1,4 @@
-# ats.py
+# dut.py
 
 import json
 from scpi_server import SCPIServer
@@ -13,11 +13,11 @@ NUM_CHANNELS = config['measurement']['channels']
 
 # SCPI 服务器配置
 SCPI_HOST = config['scpi_server']['host']
-SCPI_PORT = config['scpi_server']['port']
+SCPI_PORT_BASE = config['scpi_server']['port']
 
 def main():
-    server = SCPIServer(SCPI_HOST, SCPI_PORT, NUM_DEVICES, NUM_CHANNELS)
+    server = SCPIServer(SCPI_HOST, SCPI_PORT_BASE, NUM_DEVICES,NUM_CHANNELS)
     server.run()
 
-if __name__ == "__main__":
+if __name__ == "__main__": 
     main()

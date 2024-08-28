@@ -12,7 +12,7 @@
   import CurveDisplay from './components/CurveDisplay.svelte';
   import ResultMatrix from './components/ResultMatrix.svelte';
   import MeasurementHistory from './components/MeasurementHistory.svelte';
-  import { websocketStatus, initializeWebSocket } from './utils/websocket.js';
+  import { influxdbStatus, websocketStatus, initializeWebSocket } from './utils/websocket.js';
 
   initializeWebSocket();
 
@@ -31,29 +31,6 @@
     : (selectedDevice === $currentMeasurementData.device && selectedChannel === $currentMeasurementData.channel)
       ? $currentMeasurementData.voltages
       : [];
-
-  $: chartOptions = {
-    title: {
-      text: $measurementStatus === 'running' 
-        ? `当前测试：设备 ${$currentMeasurementData.device} 通道 ${$currentMeasurementData.channel}`
-        : selectedDevice && selectedChannel
-          ? `设备 ${selectedDevice} 通道 ${selectedChannel} 的数据`
-          : '请选择一个通道'
-    },
-    xAxis: {
-      type: 'category',
-      data: chartData.map(d => d.time)
-    },
-    yAxis: {
-      type: 'value',
-      name: '电压 (mV)'
-    },
-    series: [{
-      data: chartData.map(d => d.value),
-      type: 'line',
-      name: '电压'
-    }]
-  };  
 
   let devices = Array.from({length: 12}, (_, i) => i + 1);
   let channels = Array.from({length: 18}, (_, i) => i + 1);
@@ -104,7 +81,7 @@
     true,
     $websocketStatus === 'connected',
     false,
-    false,
+    $influxdbStatus === 'writing',
     true
   ];
 
@@ -180,7 +157,7 @@
       <div class="right-panel">
         <ResultMatrix on:selectChannel={handleSelectChannel}/>
         <div class="spacer"></div>
-        <CurveDisplay options={chartOptions}/>
+        <CurveDisplay/>
         <div class="spacer"></div>
         <div class="spacer"></div>
         <div class="status-indicators">

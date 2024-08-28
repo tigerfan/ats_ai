@@ -3,6 +3,7 @@
   import { selectedDevices } from '../stores/measurementStore';
   import { selectedChannels } from '../stores/measurementStore';
   import { measurementStatus } from '../stores/measurementStore';
+  import { selectResult } from '../stores/measurementStore';
   import { createEventDispatcher } from 'svelte';
   
   export let results = [];
@@ -14,9 +15,7 @@
   }
 
   function handleCellClick(result) {
-    if ($measurementStatus !== 'running') {
-      dispatch('selectChannel', { device: result.device, channel: result.channel });
-    }
+    selectResult(result);
   }
 
   function getStatus(result) {

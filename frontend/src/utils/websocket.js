@@ -1,10 +1,8 @@
 import { writable } from 'svelte/store';
-import { currentMeasurementData } from '../stores/measurementStore';
-import { measurementResults } from '../stores/measurementStore';
-import { measurementStatus } from '../stores/measurementStore';
-import { updateCurrentMeasurementData } from '../stores/measurementStore';
+import { currentMeasurementData, measurementResults, measurementStatus, updateCurrentMeasurementData } from '../stores/measurementStore';
 
 export const websocketStatus = writable('disconnected');
+export const influxdbStatus = writable('waiting');
 
 let ws;
 let messageQueue = [];
@@ -38,27 +36,31 @@ export function initializeWebSocket() {
   };
 
   ws.onmessage = (event) => {
-    //console.log('收到消息:', event.data);
     try {
-      const message = JSON.parse(event.data);
-  
-      if (message.channel !== undefined && message.device !== undefined && message.voltages !== undefined) {
-        // This is the measurement data message
-        updateCurrentMeasurementData(message);
-      } else {
-        switch (message.type) {
-          case 'measurement_results':
-            measurementResults.set(message.results);
-            break;
-          case 'measurement_status':
-            measurementStatus.set(message.status);
-            break;
-          default:
-            console.log('未知的消息类型:', message.type);
+        const message = JSON.parse(event.data);
+
+        if (message.results && Array.isArray(message.results)) {
+            message.results.forEach(result => {
+                if (result.channel !== undefined && result.device !== undefined && result.voltages !== undefined) {
+                    // 这是测量数据消息
+                    updateCurrentMeasurementData(result);
+                }
+            });
+        } else {
+            switch (message.status) {
+                case 'in_progress':
+                case 'writing':
+                    influxdbStatus.set('writing')   
+                case 'completed':
+                    influxdbStatus.set('waiting')
+                    measurementStatus.set('stopped');
+                    break;
+                default:
+                    console.log('未知的消息类型:', message.status);
+            }
         }
-      }
     } catch (error) {
-      console.error('解析消息时出错:', error);
+        console.error('解析消息时出错:', error);
     }
   };
 
@@ -95,8 +97,6 @@ export function sendMessage(message) {
     }
   }
 }
-
-// 移除 manualConnect 函数
 
 // 在模块加载时自动初始化WebSocket
 initializeWebSocket();

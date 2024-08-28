@@ -1,7 +1,9 @@
 package main
 
 import (
+	"encoding/json"
 	"log"
+	"os"
 
 	"ats-project/backend/internal/api"
 	"ats-project/backend/internal/db"
@@ -10,28 +12,61 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+type Config struct {
+	Measurement struct {
+		Devices int `json:"devices"`
+	} `json:"measurement"`
+	ScpiServer struct {
+		Host string `json:"host"`
+		Port int    `json:"port"`
+	} `json:"scpi_server"`
+}
+
 func main() {
-	// 初始化数据库连接
+	// Read configuration
+	config, err := readConfig("config.json")
+	if err != nil {
+		log.Fatalf("Failed to read config: %v", err)
+	}
+
+	// Initialize database connection
 	if err := db.InitDB(); err != nil {
 		log.Fatalf("Failed to initialize database: %v", err)
 	}
 
-	// 初始化SCPI客户端
+	// Initialize SCPI client
 	scpiClient := scpi.NewClient()
-	err := scpiClient.Connect("localhost:5025") // 假设SCPI服务器在本地5025端口
+	err = scpiClient.Connect(config.ScpiServer.Host, config.Measurement.Devices)
 	if err != nil {
-		log.Fatalf("Failed to connect to SCPI server: %v", err)
+		log.Fatalf("Failed to connect to SCPI servers: %v", err)
 	}
 	defer scpiClient.Close()
 
-	// 创建Gin引擎
+	// Create Gin engine
 	r := gin.Default()
 
-	// 设置路由
+	// Set up routes
 	api.SetupRoutes(r, scpiClient)
 
-	// 启动HTTP服务器（包括WebSocket）
+	// Start HTTP server (including WebSocket)
 	if err := r.Run(":5177"); err != nil {
 		log.Fatalf("Failed to start server: %v", err)
 	}
+}
+
+func readConfig(filename string) (*Config, error) {
+	file, err := os.Open(filename)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+
+	var config Config
+	decoder := json.NewDecoder(file)
+	err = decoder.Decode(&config)
+	if err != nil {
+		return nil, err
+	}
+
+	return &config, nil
 }

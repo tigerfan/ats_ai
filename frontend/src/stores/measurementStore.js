@@ -9,21 +9,25 @@ export const currentMeasurementData = writable([]);
 export const measurementProgress = writable(0);
 export const progressStatus = writable('Waiting');
 export const selectedHistoricalChannel = writable(null);
+export const selectedResult = writable(null);
+export const allChannelData = writable({}); // 新增：存储所有通道的数据
 
-export function initializeStores() {
+export function ininitializeMatrix() {
   const totalDevices = 12;
   const totalChannels = 18;
 
-  // Initialize measurement results
   measurementResults.set(Array(totalDevices * totalChannels).fill().map((_, index) => ({
     device: Math.floor(index / totalChannels) + 1,
     channel: (index % totalChannels) + 1,
     value: 0,
-    passed: false, // 初始状态设为未通过
-    tested: false // 新增：表示是否已被测试
+    passed: false,
+    tested: false
   })));
+}
 
-  // Initialize measurement history (keeping this as is for now)
+export function initializeStores() {
+  ininitializeMatrix();
+
   measurementHistory.set(Array(15).fill().map((_, i) => ({
     timestamp: Date.now() - i * 60000,
     deviceCount: Math.floor(Math.random() * 12) + 1,
@@ -31,21 +35,18 @@ export function initializeStores() {
     status: ['completed', 'failed', 'in progress'][Math.floor(Math.random() * 3)]
   })));
 
-  // Initialize current measurement data
   currentMeasurementData.set({
     channel: null,
     device: null,
     voltages: []
   });
 
-  // Initialize measurement progress
   measurementProgress.set(0);
+  allChannelData.set({}); // 初始化所有通道数据存储
 }
 
-// Call this function when the application starts
 initializeStores();
 
-// Function to simulate measurement process
 export function simulateMeasurement() {
   progressStatus.set('开始测量');
   measurementProgress.set(0);
@@ -71,7 +72,6 @@ export function updateCurrentMeasurementData(data) {
     passed: data.passed
   });
 
-  // Update the measurementResults store
   measurementResults.update(results => {
     const index = results.findIndex(r => r.device === data.device && r.channel === data.channel);
     if (index !== -1) {
@@ -79,9 +79,36 @@ export function updateCurrentMeasurementData(data) {
         ...results[index],
         value: Math.round((data.voltages[data.voltages.length - 1] / 65536) * 5000),
         passed: data.passed,
-        tested: true // 标记为已测试
+        tested: true
       };
     }
     return results;
+  });
+
+  // 更新所有通道数据存储
+  allChannelData.update(channelData => {
+    const key = `${data.device}-${data.channel}`;
+    channelData[key] = {
+      device: data.device,
+      channel: data.channel,
+      voltages: data.voltages.map((value, index) => ({ time: index, value: Math.round((value / 65536) * 5000) })),
+      passed: data.passed
+    };
+    return channelData;
+  });
+}
+
+export function selectResult(result) {
+  selectedResult.set(result);
+  allChannelData.update(channelData => {
+    const key = `${result.device}-${result.channel}`;
+    const data = channelData[key] || {
+      channel: result.channel,
+      device: result.device,
+      voltages: [],
+      passed: result.passed
+    };
+    currentMeasurementData.set(data);
+    return channelData;
   });
 }

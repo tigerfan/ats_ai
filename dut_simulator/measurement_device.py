@@ -1,5 +1,5 @@
 # measurement_device.py
-
+import time
 import threading
 from data_generator import DataGenerator
 
@@ -14,6 +14,8 @@ class MeasurementDevice(threading.Thread):
         self.data_generator = DataGenerator(self.sample_rate, self.measurement_duration, self.full_scale)
 
     def start_measurement(self, channel):
-        # 立即生成并返回测量数据
+        # 延时 measurement_duration 时间
+        time.sleep(self.measurement_duration)
+       
         data = self.data_generator.generate_sample_data()
         return {str(channel): data}

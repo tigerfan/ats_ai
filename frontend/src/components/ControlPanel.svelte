@@ -3,10 +3,13 @@
   import { simulateMeasurement } from '../stores/measurementStore';
   import { selectedDevices } from '../stores/measurementStore';
   import { selectedChannels } from '../stores/measurementStore';
+  import { ininitializeMatrix } from '../stores/measurementStore';
   import { measurementProgress } from '../stores/measurementStore';
   import { sendMessage } from '../utils/websocket';
   
   function startMeasurement() {
+    ininitializeMatrix();
+
     const devices = $selectedDevices;
     const channels = $selectedChannels;
 
@@ -46,7 +49,7 @@
   {#if $measurementStatus === 'paused'}
     <button on:click={resumeMeasurement}>继续</button>
   {:else}
-    <button on:click={pauseMeasurement}>暂停</button>
+    <button on:click={pauseMeasurement} disabled={$measurementStatus !== 'running'}>暂停</button>
   {/if}
   <button on:click={stopMeasurement} disabled={$measurementStatus === 'stopped'}>
     停止

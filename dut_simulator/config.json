@@ -8,8 +8,8 @@
     "measurement": {
         "devices": 12,
         "channels": 18,
-        "sample_rate": 1000,
-        "measurement_duration": 1.0,
+        "sample_rate": 10000,
+        "measurement_duration": 0.15,
         "full_scale": 5.0,
         "target_voltage": 4.0,
         "voltage_fluctuation": 0.2,
