@@ -6,12 +6,12 @@ import json
 from measurement_device import MeasurementDevice
 
 class SCPIServer:
-    def __init__(self, host, port_base, num_devices, num_channels):
+    def __init__(self, host, port_base, num_devices, num_channels, sample_rate, measurement_duration, full_scale):
         self.host = host
         self.port_base = port_base
         self.num_devices = num_devices
         self.num_channels = num_channels
-        self.devices = {i: MeasurementDevice(i, num_channels) for i in range(1, num_devices + 1)}
+        self.devices = {i: MeasurementDevice(i, num_channels, sample_rate, measurement_duration, full_scale) for i in range(1, num_devices + 1)}
         for device in self.devices.values():
             device.start()
 

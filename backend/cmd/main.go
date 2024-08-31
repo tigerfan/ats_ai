@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"os"
 
@@ -20,6 +21,9 @@ type Config struct {
 		Host string `json:"host"`
 		Port int    `json:"port"`
 	} `json:"scpi_server"`
+	HttpServer struct {
+		Port int `json:"port"`
+	} `json:"http_server"`
 }
 
 func main() {
@@ -36,7 +40,7 @@ func main() {
 
 	// Initialize SCPI client
 	scpiClient := scpi.NewClient()
-	err = scpiClient.Connect(config.ScpiServer.Host, config.Measurement.Devices)
+	err = scpiClient.Connect(config.ScpiServer.Host, config.ScpiServer.Port, config.Measurement.Devices)
 	if err != nil {
 		log.Fatalf("Failed to connect to SCPI servers: %v", err)
 	}
@@ -49,7 +53,7 @@ func main() {
 	api.SetupRoutes(r, scpiClient)
 
 	// Start HTTP server (including WebSocket)
-	if err := r.Run(":5177"); err != nil {
+	if err := r.Run(fmt.Sprintf(":%d", config.HttpServer.Port)); err != nil {
 		log.Fatalf("Failed to start server: %v", err)
 	}
 }
@@ -57,7 +61,7 @@ func main() {
 func readConfig(filename string) (*Config, error) {
 	file, err := os.Open(filename)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("could not open config file %s: %v", filename, err)
 	}
 	defer file.Close()
 
@@ -65,7 +69,7 @@ func readConfig(filename string) (*Config, error) {
 	decoder := json.NewDecoder(file)
 	err = decoder.Decode(&config)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("could not decode config file %s: %v", filename, err)
 	}
 
 	return &config, nil

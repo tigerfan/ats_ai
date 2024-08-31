@@ -1,5 +1,5 @@
 import { writable } from 'svelte/store';
-import { currentMeasurementData, measurementResults, measurementStatus, updateCurrentMeasurementData } from '../stores/measurementStore';
+import { currentMeasurementData, measurementResults, measurementHistory, measurementStatus, updateCurrentMeasurementData } from '../stores/measurementStore';
 
 export const websocketStatus = writable('disconnected');
 export const influxdbStatus = writable('waiting');
@@ -54,6 +54,9 @@ export function initializeWebSocket() {
                 case 'completed':
                     influxdbStatus.set('waiting')
                     measurementStatus.set('stopped');
+                    break;
+                case 'measurementHistory':
+                    measurementHistory.set(message.history);
                     break;
                 default:
                     console.log('未知的消息类型:', message.status);

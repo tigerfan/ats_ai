@@ -20,12 +20,12 @@ func NewClient() *Client {
 	}
 }
 
-func (c *Client) Connect(baseAddress string, numDevices int) error {
+func (c *Client) Connect(baseAddress string, basePort int, numDevices int) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
 	for i := 1; i <= numDevices; i++ {
-		address := fmt.Sprintf("%s:%d", baseAddress, 5025+i-1)
+		address := fmt.Sprintf("%s:%d", baseAddress, basePort+i-1)
 		conn, err := net.Dial("tcp", address)
 		if err != nil {
 			return fmt.Errorf("failed to connect to device %d: %w", i, err)

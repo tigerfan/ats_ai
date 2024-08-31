@@ -4,7 +4,7 @@ import threading
 from data_generator import DataGenerator
 
 class MeasurementDevice(threading.Thread):
-    def __init__(self, device_id, num_channels, sample_rate=1000, measurement_duration=1, full_scale=5):
+    def __init__(self, device_id, num_channels, sample_rate, measurement_duration, full_scale):
         threading.Thread.__init__(self)
         self.device_id = device_id
         self.channels = num_channels

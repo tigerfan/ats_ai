@@ -24,9 +24,10 @@ var (
 )
 
 type Message struct {
-	Action   string `json:"action"`
-	Devices  []int  `json:"devices"`
-	Channels []int  `json:"channels"`
+	Action   string      `json:"action"`
+	Devices  []int       `json:"devices"`
+	Channels []int       `json:"channels"`
+	Params   interface{} `json:"params"`
 }
 
 var (
@@ -108,6 +109,10 @@ func handleWebSocketMessage(conn *websocket.Conn, messageType int, message []byt
 			measurementPaused = false
 			pauseCond.Broadcast()
 		}
+	case "getMeasurementHistory":
+		go sendMeasurementHistory(conn, msg.Params)
+	case "getHistoricalData":
+		go sendHistoricalData(conn, msg.Params)
 	default:
 		log.Println("Unknown action:", msg.Action)
 	}
@@ -115,6 +120,10 @@ func handleWebSocketMessage(conn *websocket.Conn, messageType int, message []byt
 
 func startMeasurement(conn *websocket.Conn, scpiClient *scpi.Client, devices, channels []int) {
 	log.Println("Measurement started")
+	startTime := time.Now()
+
+	results := make(chan map[string]interface{}, len(devices)*len(channels))
+	allResults := []map[string]interface{}{}
 	defer func() {
 		stateMutex.Lock()
 		measurementRunning = false
@@ -131,11 +140,16 @@ func startMeasurement(conn *websocket.Conn, scpiClient *scpi.Client, devices, ch
 		stateMutex.Unlock()
 		log.Println("Measurement completed")
 
-		// Notify the client that the measurement has completed and write data to the database
-		notifyMeasurementComplete(conn, devices, channels)
+		endTime := time.Now()
+
+		for result := range results {
+			allResults = append(allResults, result)
+		}
+
+		// Asynchronously write measurement history and data to the database
+		go writeMeasurementToDB(conn, devices, channels, startTime, endTime, allResults)
 	}()
 
-	results := make(chan map[string]interface{}, len(devices)*len(channels))
 	var wg sync.WaitGroup
 
 	for _, device := range devices {
@@ -244,27 +258,42 @@ func sendBatch(conn *websocket.Conn, batch []map[string]interface{}, completed b
 	}
 }
 
-func notifyMeasurementComplete(conn *websocket.Conn, devices, channels []int) {
-	// Notify the client that the writing process to the database is starting
-	sendMessage(conn, "writing", "Measurement data is being written to the database")
-	log.Println("Measurement data is being written to the database...")
-
-	// Write measurement data to the database
-	for _, device := range devices {
-		for _, channel := range channels {
-			// Here we assume the voltages were stored in the results and now need to be written to the database
-			// Convert voltages from []int to []float64
-			voltages := []float64{} // Retrieve the actual voltages for this device and channel
-
-			if err := db.WriteMeasurementData(device, channel, voltages); err != nil {
-				log.Printf("Error writing measurement data to database: %v\n", err)
-				sendMessage(conn, "error", "Error writing measurement data to the database")
-				return
-			}
-		}
+func writeMeasurementToDB(conn *websocket.Conn, devices, channels []int, startTime, endTime time.Time, results []map[string]interface{}) {
+	// 写入测量历史记录
+	historyID, err := db.WriteMeasurementHistory(startTime, endTime, "completed", len(devices), len(channels))
+	if err != nil {
+		log.Printf("Error writing measurement history to database: %v\n", err)
+		sendMessage(conn, "error", "Error writing measurement history to the database")
+		return
 	}
 
-	// Notify the client that the writing process to the database has completed
+	var wg sync.WaitGroup
+	semaphore := make(chan struct{}, 10) // 限制并发写入的数量
+
+	for _, result := range results {
+		wg.Add(1)
+		semaphore <- struct{}{}
+		go func(r map[string]interface{}) {
+			defer wg.Done()
+			defer func() { <-semaphore }()
+
+			device := r["device"].(int)
+			channel := r["channel"].(int)
+			voltages, ok := r["voltages"].([]float64)
+			if !ok {
+				log.Printf("Error: voltages is not of type []float64\n")
+				return
+			}
+
+			if err := db.WriteMeasurementData(historyID, device, channel, voltages); err != nil {
+				log.Printf("Error writing measurement data to database: %v\n", err)
+			}
+		}(result)
+	}
+
+	wg.Wait()
+
+	// 通知客户端写入数据库过程已完成
 	sendMessage(conn, "completed", "Measurement data has been successfully written to the database")
 	log.Println("Measurement data has been successfully written to the database!")
 }
@@ -283,6 +312,67 @@ func sendMessage(conn *websocket.Conn, status, message string) {
 
 	if err := conn.WriteMessage(websocket.TextMessage, jsonResponse); err != nil {
 		log.Printf("Error sending message: %v\n", err)
+	}
+}
+
+func sendHistoricalData(conn *websocket.Conn, params interface{}) {
+	// 解析参数以获取 historyID
+	paramsMap, ok := params.(map[string]interface{})
+	if !ok {
+		sendErrorMessage(conn, "Invalid parameters for historical data")
+		return
+	}
+
+	historyID, ok := paramsMap["historyID"].(float64)
+	if !ok {
+		sendErrorMessage(conn, "Invalid history ID")
+		return
+	}
+
+	// 从 InfluxDB 获取历史数据
+	voltages, err := db.GetHistoricalData(int64(historyID))
+	if err != nil {
+		sendErrorMessage(conn, "Error fetching historical data")
+		return
+	}
+
+	response := map[string]interface{}{
+		"status":    "historicalData",
+		"historyID": int64(historyID),
+		"results":   voltages,
+	}
+
+	if err := conn.WriteJSON(response); err != nil {
+		log.Printf("Error sending historical data: %v\n", err)
+	}
+}
+
+func sendMeasurementHistory(conn *websocket.Conn, params interface{}) {
+	// 从 InfluxDB 获取测量历史记录
+	history, err := db.GetMeasurementHistory()
+	if err != nil {
+		sendErrorMessage(conn, "Error fetching measurement history")
+		return
+	}
+
+	response := map[string]interface{}{
+		"status":  "measurementHistory",
+		"history": history,
+	}
+
+	if err := conn.WriteJSON(response); err != nil {
+		log.Printf("Error sending measurement history: %v\n", err)
+	}
+}
+
+func sendErrorMessage(conn *websocket.Conn, message string) {
+	response := map[string]interface{}{
+		"status":  "error",
+		"message": message,
+	}
+
+	if err := conn.WriteJSON(response); err != nil {
+		log.Printf("Error sending error message: %v\n", err)
 	}
 }
 

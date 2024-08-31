@@ -42,6 +42,16 @@
     $measurementStatus = 'stopped';
     sendMessage({ action: 'stop' });
   }
+
+  function check1() {
+    $measurementStatus = 'stopped';
+    sendMessage({ action: 'getMeasurementHistory' });
+  }
+  
+  function check2() {
+    $measurementStatus = 'stopped';
+    sendMessage({ action: 'getHistoricalData' });
+  }
 </script>
  
  <div class="control-panel">
@@ -54,7 +64,8 @@
   <button on:click={stopMeasurement} disabled={$measurementStatus === 'stopped'}>
     停止
   </button>
-  <button on:click={simulateMeasurement}>自检</button>
+  <button on:click={check1}>测量历史</button>
+  <button on:click={check2}>历史数据</button>
 </div>
 
 <style>
