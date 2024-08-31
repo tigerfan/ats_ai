@@ -43,7 +43,7 @@ ATS项目是一个自动化测试系统，用于同时测量多台设备的多�
    ```
 4. 编译项目：
    ```
-   go build -o ats-server cmd/main.go
+   go build -o test.exe ./cmd/main.go
    ```
 
 ### 设备模拟器
@@ -53,6 +53,10 @@ ATS项目是一个自动化测试系统，用于同时测量多台设备的多�
 3. 安装依赖：
    ```
    pip install -r requirements.txt
+   ```
+4. 构建：
+   ```
+   pyinstall --onefile dut.py
    ```
 
 ### 数据库
@@ -66,12 +70,12 @@ ATS项目是一个自动化测试系统，用于同时测量多台设备的多�
 
 2. 启动后端服务：
    ```
-   ./ats-server
+   test
    ```
 
 3. 启动设备模拟器：
    ```
-   python ats_device_simulator.py
+   dut 
    ```
 
 4. 启动前端开发服务器（用于开发环境）：
@@ -84,8 +88,7 @@ ATS项目是一个自动化测试系统，用于同时测量多台设备的多�
 
 ## 配置
 
-- 后端配置：修改 `backend/config.yaml` 文件
-- 设备模拟器配置：修改 `device_simulator/config.ini` 文件
+- 后端配置：`config.json` 文件
 
 ## 开发
 
