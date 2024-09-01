@@ -102,14 +102,12 @@ func GetMeasurementHistory() ([]map[string]interface{}, error) {
 
 	query := fmt.Sprintf(`
         from(bucket:"%s")
-            |> range(start: -1h)
+            |> range(start: -1d)
             |> filter(fn: (r) => r._measurement == "measurement_history")
             |> pivot(rowKey:["_time", "history_id"], columnKey: ["_field"], valueColumn: "_value")
             |> sort(columns: ["_time"], desc: true)
-            |> limit(n: 10)
+            |> limit(n: 16)
     `, config.InfluxDB.Bucket)
-
-	log.Printf("Executing query: %s", query)
 
 	result, err := queryAPI.Query(context.Background(), query)
 	if err != nil {
@@ -121,7 +119,7 @@ func GetMeasurementHistory() ([]map[string]interface{}, error) {
 	var history []map[string]interface{}
 	for result.Next() {
 		record := result.Record()
-		log.Printf("Raw record: %+v", record.Values())
+		//log.Printf("Raw record: %+v", record.Values())
 		historyEntry := map[string]interface{}{
 			"start_time":    record.ValueByKey("start_time"),
 			"end_time":      record.ValueByKey("end_time"),
@@ -132,17 +130,13 @@ func GetMeasurementHistory() ([]map[string]interface{}, error) {
 			"timestamp":     record.Time().Unix(),
 		}
 		history = append(history, historyEntry)
-
-		log.Printf("Record: %+v (Time: %s)", historyEntry, time.Unix(record.Time().Unix(), 0).Format(time.RFC3339))
+		if len(history) > 16 {
+			history = history[len(history)-16:]
+		}
 	}
 
 	if result.Err() != nil {
 		log.Printf("Result error: %v", result.Err())
-	}
-
-	log.Printf("Returning %d measurement history records", len(history))
-	for i, entry := range history {
-		log.Printf("Record %d: %+v (Time: %s)", i+1, entry, time.Unix(entry["timestamp"].(int64), 0).Format(time.RFC3339))
 	}
 
 	return history, nil

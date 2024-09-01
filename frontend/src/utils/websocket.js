@@ -56,6 +56,7 @@ export function initializeWebSocket() {
                     measurementStatus.set('stopped');
                     break;
                 case 'measurementHistory':
+                    //console.debug('Setting measurement history:', message.history);    
                     measurementHistory.set(message.history);
                     break;
                 default:

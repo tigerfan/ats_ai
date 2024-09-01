@@ -138,7 +138,7 @@
             </tr>
           </tbody>
         </table>  
-        <MeasurementHistory history={$measurementHistory.slice(0, 8)}/>
+        <MeasurementHistory history={$measurementHistory.slice(0, 16)}/>
         <div class="spacer"></div>
 
         <div class="status-bar">
