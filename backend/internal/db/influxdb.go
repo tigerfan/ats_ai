@@ -24,20 +24,17 @@ var (
 )
 
 func InitDB() error {
-	// 读取 config.json 文件
 	configFile, err := ioutil.ReadFile("config.json")
 	if err != nil {
 		log.Printf("Failed to read config file: %v", err)
 		return fmt.Errorf("failed to read config file: %w", err)
 	}
 
-	// 将 JSON 数据解码到 config 结构体中
 	if err := json.Unmarshal(configFile, &config); err != nil {
 		log.Printf("Failed to unmarshal config file: %v", err)
 		return fmt.Errorf("failed to unmarshal config file: %w", err)
 	}
 
-	// 初始化 InfluxDB 客户端
 	client = influxdb2.NewClient(config.InfluxDB.URL, config.InfluxDB.Token)
 	log.Println("InfluxDB client initialized successfully")
 	return nil
@@ -46,7 +43,7 @@ func InitDB() error {
 func WriteMeasurementHistory(startTime, endTime time.Time, status string, deviceCount, channelCount int) (int64, error) {
 	writeAPI := client.WriteAPIBlocking(config.InfluxDB.Org, config.InfluxDB.Bucket)
 
-	historyID := time.Now().UnixNano() // 使用当前时间的纳秒值作为唯一标识符
+	historyID := time.Now().UnixNano()
 
 	p := influxdb2.NewPoint(
 		"measurement_history",
@@ -68,7 +65,8 @@ func WriteMeasurementHistory(startTime, endTime time.Time, status string, device
 		log.Printf("Failed to write measurement history: %v", err)
 		return 0, err
 	}
-
+	log.Printf("Writing measurement history: start_time=%v, end_time=%v, status=%s, device_count=%d, channel_count=%d, history_id=%d",
+		startTime.Unix(), endTime.Unix(), status, deviceCount, channelCount, historyID)
 	log.Println("Successfully wrote measurement history")
 	return historyID, nil
 }
@@ -90,14 +88,12 @@ func WriteMeasurementData(historyID int64, deviceID, channelID int, voltages []f
 			time.Now().Add(time.Duration(i)*time.Millisecond),
 		)
 
-		// 非阻塞写入
 		writeAPI.WritePoint(p)
 	}
 
-	// 确保数据被刷新到服务器并处理完毕
 	writeAPI.Flush()
 
-	log.Printf("Successfully wrote %d voltage measurements for device %d, channel %d", len(voltages), deviceID, channelID)
+	log.Printf("Successfully wrote %d voltage measurements for device %d, channel %d, history_id %d", len(voltages), deviceID, channelID, historyID)
 	return nil
 }
 
@@ -106,8 +102,9 @@ func GetMeasurementHistory() ([]map[string]interface{}, error) {
 
 	query := fmt.Sprintf(`
         from(bucket:"%s")
-            |> range(start: -30d)
+            |> range(start: -1h)
             |> filter(fn: (r) => r._measurement == "measurement_history")
+            |> pivot(rowKey:["_time", "history_id"], columnKey: ["_field"], valueColumn: "_value")
             |> sort(columns: ["_time"], desc: true)
             |> limit(n: 10)
     `, config.InfluxDB.Bucket)
@@ -124,20 +121,30 @@ func GetMeasurementHistory() ([]map[string]interface{}, error) {
 	var history []map[string]interface{}
 	for result.Next() {
 		record := result.Record()
-		history = append(history, map[string]interface{}{
+		log.Printf("Raw record: %+v", record.Values())
+		historyEntry := map[string]interface{}{
 			"start_time":    record.ValueByKey("start_time"),
 			"end_time":      record.ValueByKey("end_time"),
 			"status":        record.ValueByKey("status"),
 			"device_count":  record.ValueByKey("device_count"),
 			"channel_count": record.ValueByKey("channel_count"),
-		})
+			"history_id":    record.ValueByKey("history_id"),
+			"timestamp":     record.Time().Unix(),
+		}
+		history = append(history, historyEntry)
+
+		log.Printf("Record: %+v (Time: %s)", historyEntry, time.Unix(record.Time().Unix(), 0).Format(time.RFC3339))
 	}
 
 	if result.Err() != nil {
 		log.Printf("Result error: %v", result.Err())
 	}
 
-	log.Printf("Returning measurement history: %v", history)
+	log.Printf("Returning %d measurement history records", len(history))
+	for i, entry := range history {
+		log.Printf("Record %d: %+v (Time: %s)", i+1, entry, time.Unix(entry["timestamp"].(int64), 0).Format(time.RFC3339))
+	}
+
 	return history, nil
 }
 
