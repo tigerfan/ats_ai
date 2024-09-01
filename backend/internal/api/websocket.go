@@ -110,7 +110,7 @@ func handleWebSocketMessage(conn *websocket.Conn, messageType int, message []byt
 			pauseCond.Broadcast()
 		}
 	case "getMeasurementHistory":
-		go sendMeasurementHistory(conn, msg.Params)
+		go sendMeasurementHistory(conn)
 	case "getHistoricalData":
 		go sendHistoricalData(conn, msg.Params)
 	default:
@@ -347,7 +347,7 @@ func sendHistoricalData(conn *websocket.Conn, params interface{}) {
 	}
 }
 
-func sendMeasurementHistory(conn *websocket.Conn, params interface{}) {
+func sendMeasurementHistory(conn *websocket.Conn) {
 	// 从 InfluxDB 获取测量历史记录
 	history, err := db.GetMeasurementHistory()
 	if err != nil {
